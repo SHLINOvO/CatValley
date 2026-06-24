@@ -101,6 +101,13 @@ public:
         glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(indices.size()), GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
     }
+
+    // Shadow pass: only draw geometry for depth, no texture/material bindings
+    void DrawShadowOnly() {
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(indices.size()), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    }
 };
 
 // ！！！！！！！！ Model 窃 ！！！！！！！！
@@ -212,6 +219,36 @@ public:
         }
 
         drawAnimatedNode(scene->mRootNode, shader, baseTransform, animationTime);
+    }
+
+    // Shadow pass: update morph (same as normal pass), then draw depth only
+    void DrawShadow(Shader& shadowShader, glm::mat4 baseTransform, float currentTime) {
+        if (!scene) return;
+
+        // Update morph targets (same logic as UpdateAndDraw, so shadows match geometry)
+        float time = glfwGetTime();
+        std::vector<float> testWeights(311, 0.0f);
+        if (externalState == 2) {          // RUN
+            auto w = generateGaussianWaveWeights(time * 1000.0f, 32, 1338.0f, 1.0f);
+            std::copy(w.begin(), w.end(), testWeights.begin() + 210);
+        }
+        else if (externalState == 1) {     // WALK
+            auto w = generateGaussianWaveWeights(time * 1000.0f, 50, 2075.0f, 1.0f);
+            std::copy(w.begin(), w.end(), testWeights.begin() + 260);
+        }
+        else {                             // IDLE
+            auto w = generateGaussianWaveWeights(time * 1000.0f, 20, 4000.0f, 1.0f);
+            std::copy(w.begin(), w.end(), testWeights.begin());
+        }
+
+        for (auto& m : meshes) {
+            if (!m.morphTargets.empty()) {
+                m.updateMorphAnimation(testWeights);
+            }
+        }
+
+        // Draw to shadow depth map (no textures/materials)
+        drawNodeShadow(scene->mRootNode, shadowShader, baseTransform);
     }
 
 private:
@@ -347,6 +384,21 @@ private:
 
         for (unsigned int i = 0; i < node->mNumChildren; i++) {
             drawNode(node->mChildren[i], shader, globalTransform);
+        }
+    }
+
+    // --- Shadow-only recursive draw (no texture/material bindings) ---
+    void drawNodeShadow(aiNode* node, Shader& shadowShader, glm::mat4 parentTransform) {
+        glm::mat4 nodeTransform = convertMatrixToGLM(node->mTransformation);
+        glm::mat4 globalTransform = parentTransform * nodeTransform;
+
+        for (unsigned int i = 0; i < node->mNumMeshes; i++) {
+            shadowShader.setMat4("model", globalTransform);
+            meshes[node->mMeshes[i]].DrawShadowOnly();
+        }
+
+        for (unsigned int i = 0; i < node->mNumChildren; i++) {
+            drawNodeShadow(node->mChildren[i], shadowShader, globalTransform);
         }
     }
     // --- 2. 強鮫弓拷籌半 ---

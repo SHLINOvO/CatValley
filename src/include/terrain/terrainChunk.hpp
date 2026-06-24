@@ -26,8 +26,14 @@ public:
 
     void Draw(Shader& shader, int lod);
 
+    // 从 heightmap 重建顶点数据并更新 GPU 缓冲（carveLake 后调用）
+    void rebuild();
+
     AABB TerrainChunk::getAABBWorld() const { return bounds; };
     glm::vec3 getCenter() const { return center; };
+
+    int getChunkX() const { return chunkX; }
+    int getChunkZ() const { return chunkZ; }
 
 private:
     void buildVertices();
@@ -441,4 +447,23 @@ glm::vec3 TerrainChunk::calculateNormal(int hx, int hz) const
     return glm::normalize(n);
 }
 
+void TerrainChunk::rebuild() {
+    const float SKIRT_DEPTH = 50.0f;
+
+    // 1) 重建主地形顶点（从已更新的 heightmap 读取）
+    buildVertices();
+
+    // 2) 重建裙边顶点（边界顶点下拉副本）
+    buildSkirtVertices(SKIRT_DEPTH);
+
+    // 3) 重新计算 AABB
+    computeBounds(SKIRT_DEPTH);
+
+    // 4) 更新 GPU VBO（索引不变，只需要更新顶点缓冲）
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER,
+        vertices.size() * sizeof(TerrainVertex),
+        vertices.data(),
+        GL_STATIC_DRAW);
+}
 

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <memory>
 #include <cmath>
+#include <algorithm>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -116,9 +117,7 @@ public:
                 for (int si = 0; si < (int)species_.size(); ++si) {
                     const Species& sp = species_[si];
 
-                    if (sp.type == SpeciesType::GroundCover) {
-                        continue;
-                    }
+                    // GroundCover 也参与随机散布（density > 0 时生效）
 
                     // 把 density 转成每个采样点的接受概率（近似：density * cellArea）
                     float p = glm::clamp(sp.density * baseStep * baseStep, 0.0f, 0.4f);
@@ -192,6 +191,94 @@ public:
 
             model.Draw(shader, M);
 
+        }
+    }
+
+    // Shadow pass: render vegetation into shadow depth map
+    void renderShadow(const Terrain& terrain,
+        Shader& shadowShader,
+        const glm::mat4& lightSpaceMatrix)
+    {
+        shadowShader.use();
+        shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+        // Use light position as "camera" for distance culling in shadow pass
+        glm::vec3 lightPos = glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) * 200.0f;
+
+        for (const auto& inst : instances_) {
+            const Species& sp = species_[inst.speciesIndex];
+            Model& model = *models_[inst.speciesIndex];
+
+            // No distance culling for shadow pass (need all shadows)
+            // But skip ground cover (too small, negligible shadow)
+            if (sp.type == SpeciesType::GroundCover) continue;
+
+            float h = model.getAabbHeight();
+            float scale = (h > 1e-6f) ? (sp.targetHeight / h) : 1.0f;
+            scale *= inst.uniformScale;
+
+            glm::mat4 local(1.0f);
+            local = local * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+            local = local * model.getNormalizeTransform(true, true);
+
+            glm::mat4 M(1.0f);
+            M = glm::translate(M, inst.pos);
+            M = glm::rotate(M, inst.yawRad, { 0, 1, 0 });
+            M = M * local;
+
+            shadowShader.setMat4("model", M);
+            model.Draw(shadowShader, M);  // Draw sets model matrix per-node, textures harmless in shadow pass
+        }
+    }
+
+    // Normal render pass with shadow map
+    void renderWithShadow(const Terrain& terrain,
+        Shader& shader,
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const glm::vec3& cameraPos,
+        const glm::mat4& lightSpaceMatrix,
+        int shadowMapUnit)
+    {
+        shader.use();
+        shader.setMat4("view", view);
+        shader.setMat4("projection", projection);
+        shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        shader.setInt("shadowMap", shadowMapUnit);
+
+        // Lighting uniforms needed by tree.fs
+        glm::vec3 lightDir = glm::normalize(glm::vec3(-0.3f, -1.0f, -0.4f));
+        shader.setVec3("light.direction", lightDir);
+        shader.setVec3("light.color", glm::vec3(2.0f, 1.9f, 1.7f));  // outdoor sunlight
+        shader.setVec3("viewPos", cameraPos);
+
+        for (const auto& inst : instances_) {
+            const Species& sp = species_[inst.speciesIndex];
+            Model& model = *models_[inst.speciesIndex];
+
+            float maxDist = 800.0f;
+            switch (sp.type) {
+            case SpeciesType::GroundCover: maxDist = 140.0f; break;
+            case SpeciesType::Shrub:       maxDist = 250.0f; break;
+            default:                       maxDist = 800.0f; break;
+            }
+            glm::vec3 d = inst.pos - cameraPos;
+            if (glm::dot(d, d) > maxDist * maxDist) continue;
+
+            float h = model.getAabbHeight();
+            float scale = (h > 1e-6f) ? (sp.targetHeight / h) : 1.0f;
+            scale *= inst.uniformScale;
+
+            glm::mat4 local(1.0f);
+            local = local * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+            local = local * model.getNormalizeTransform(true, true);
+
+            glm::mat4 M(1.0f);
+            M = glm::translate(M, inst.pos);
+            M = glm::rotate(M, inst.yawRad, { 0, 1, 0 });
+            M = M * local;
+
+            model.Draw(shader, M);
         }
     }
 
@@ -305,6 +392,64 @@ public:
 
 
     size_t instanceCount() const { return instances_.size(); }
+
+    // 获取所有 GroundCover（花/草）类型的物种下标，供外部生成花丛用
+    std::vector<int> getGroundCoverSpeciesIndices() const {
+        std::vector<int> result;
+        for (int i = 0; i < (int)species_.size(); ++i) {
+            if (species_[i].type == SpeciesType::GroundCover)
+                result.push_back(i);
+        }
+        return result;
+    }
+
+    // 删除位于指定圆形区域内的所有实例（湖泊区域内去树）
+    void removeInstancesInCircle(float cx, float cz, float radius) {
+        float r2 = radius * radius;
+        instances_.erase(
+            std::remove_if(instances_.begin(), instances_.end(),
+                [&](const Instance& inst) {
+                    float dx = inst.pos.x - cx;
+                    float dz = inst.pos.z - cz;
+                    return (dx * dx + dz * dz) < r2;
+                }),
+            instances_.end()
+        );
+    }
+
+    // ---- 树干碰撞信息 ----
+    // 只返回"真正的树"（果树/阔叶/针叶），灌木和地被排除
+    struct TreeCollisionInfo {
+        glm::vec3 pos;          // 树根世界坐标
+        float trunkRadius;      // 树干半宽（XZ）
+        float trunkHeight;      // 树干高度（Y，从地面起）
+    };
+
+    std::vector<TreeCollisionInfo> getTreeCollisionInfos() const {
+        std::vector<TreeCollisionInfo> result;
+        for (const auto& inst : instances_) {
+            const Species& sp = species_[inst.speciesIndex];
+            // 灌木和地被 → 不碰撞，直接穿过
+            if (sp.type == SpeciesType::Shrub || sp.type == SpeciesType::GroundCover)
+                continue;
+
+            float scale = inst.uniformScale;
+            float height = sp.targetHeight * scale;
+
+            // 树干参数：不同类型树干粗细略有差异
+            float radius;
+            float heightRatio;
+            switch (sp.type) {
+            case SpeciesType::OrchardFruit:   radius = 0.5f; heightRatio = 0.28f; break;  // 果树
+            case SpeciesType::DeciduousTree:  radius = 0.6f; heightRatio = 0.22f; break;  // 阔叶
+            case SpeciesType::ConiferTree:    radius = 0.4f; heightRatio = 0.35f; break;  // 针叶
+            default:                          radius = 1.0f; heightRatio = 0.25f; break;
+            }
+
+            result.push_back({ inst.pos, radius, height * heightRatio });
+        }
+        return result;
+    }
 
 private:
     // ---- spacing grid（同类最小间距）----

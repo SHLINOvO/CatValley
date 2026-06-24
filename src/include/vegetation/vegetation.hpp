@@ -195,7 +195,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
     std::vector<int> bedSpecies;
     bedSpecies.reserve(6);
 
-    // 目标高度与间距需要根据模型实际尺度微调：以下是一套“先能很密”的默认值
+    // 初始花丛用较密间距，地图随机散布的花草也走这套物种
     bedSpecies.push_back(veg->addSpecies(VegetationManager::Species(
         "ColoredFlower",
         Type::GroundCover,
@@ -203,7 +203,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerDir,
         0.55f,          // targetHeight
         0.85f, 1.15f,
-        1.0f,           // density 对花坪生成函数不强依赖，可随意
+        0.0006f,        // density（随机散布用，初始花丛不依赖此值）
         0.55f           // minSpacing
     )));
 
@@ -214,7 +214,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerDir,
         0.50f,
         0.85f, 1.15f,
-        1.0f,
+        0.0006f,
         0.52f
     )));
 
@@ -225,7 +225,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerDir,
         0.60f,
         0.85f, 1.18f,
-        1.0f,
+        0.0006f,
         0.58f
     )));
 
@@ -236,7 +236,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerDir,
         0.45f,
         0.85f, 1.12f,
-        1.0f,
+        0.0006f,
         0.45f
     )));
 
@@ -247,7 +247,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerDir,
         0.40f,
         0.85f, 1.12f,
-        1.0f,
+        0.0006f,
         0.32f
     )));
 
@@ -258,7 +258,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerDir,
         0.65f,
         0.85f, 1.20f,
-        1.0f,
+        0.0006f,
         0.62f
     )));
 
@@ -276,7 +276,7 @@ inline std::unique_ptr<VegetationManager> CreateDefaultVegetationManager(
         flowerBedCenter,
         flowerBedRadius,
         bedSpecies,
-        0.7f,           // 覆盖率：越大越“看不到地面”
+        0.7f,           // 覆盖率：越大越"看不到地面"
         90               // 重试次数：越大越密但生成更慢
     );
 

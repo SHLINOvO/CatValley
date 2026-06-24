@@ -16,7 +16,7 @@ public:
         int chunkSize,
         float gridScale
     )
-        : heightmap(heightmap), gridScale(gridScale)
+        : heightmap(heightmap), gridScale(gridScale), chunkSize(chunkSize)
     {
         chunks.reserve(chunkCountX * chunkCountZ);
 
@@ -83,6 +83,32 @@ public:
 
     float getWorldSizeX() const { return worldSizeX; }
     float getWorldSizeZ() const { return worldSizeZ; }
+
+    // 重建受湖泊影响的 chunks（carveLake 后调用）
+    void rebuildChunksAround(float worldCX, float worldCZ, float worldRadius) {
+        float halfW = (heightmap.width - 1) * gridScale * 0.5f;
+        float halfH = (heightmap.height - 1) * gridScale * 0.5f;
+
+        // 每个 chunk 的世界范围：从 (chunkX*(chunkSize-1)*gridScale - halfW) 开始
+        float chunkWorldSize = (chunkSize - 1) * gridScale;
+
+        for (auto& chunk : chunks) {
+            float cx0 = chunk.getChunkX() * chunkWorldSize - halfW;
+            float cz0 = chunk.getChunkZ() * chunkWorldSize - halfH;
+            float cx1 = cx0 + chunkWorldSize;
+            float cz1 = cz0 + chunkWorldSize;
+
+            // 检查 chunk AABB 是否与湖泊圆有交集
+            // 找到 chunk AABB 上离湖泊中心最近的点
+            float nearestX = glm::clamp(worldCX, cx0, cx1);
+            float nearestZ = glm::clamp(worldCZ, cz0, cz1);
+            float dist = glm::distance(glm::vec2(nearestX, nearestZ), glm::vec2(worldCX, worldCZ));
+
+            if (dist <= worldRadius + 5.0f) {  // +5 额外范围确保边缘过渡区也重建
+                chunk.rebuild();
+            }
+        }
+    }
 
 
     // ===================== 世界高度查询 ========================
@@ -214,6 +240,7 @@ private:
     Frustum frustum;
 
     float gridScale;
+    int chunkSize;
 
     // LOD 距离阈值（世界单位）
     float lod0Distance = 200.0f;

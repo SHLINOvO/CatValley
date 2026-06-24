@@ -42,16 +42,21 @@ public:
 
     void setLODDistances(float d0, float d1, float d2);
     void render(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraPos);
+    void renderShadow(Shader& shadowShader, const glm::mat4& lightSpaceMatrix, const glm::vec3& shadowCenter);
+    void renderWithShadow(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraPos,
+                          const glm::mat4& lightSpaceMatrix, int shadowMapUnit);
 
     float getHeightWorld(float worldX, float worldZ) const;
     glm::vec3 getNormalWorld(float worldX, float worldZ) const;
     float getSlopeRadians(float worldX, float worldZ) const;
     float getSlopeDegrees(float worldX, float worldZ) const;
 
-private:
-    void loadTextures();
-    void setupShader();
+    // 重建受湖泊影响的 chunks（carveLake 后调用）
+    void rebuildLakeChunks(float cx, float cz, float radius) {
+        terrainSystem.rebuildChunksAround(cx, cz, radius);
+    }
 
+public:
     Heightmap heightmap;
     TerrainSystem terrainSystem;
     Shader terrainShader;
@@ -68,15 +73,19 @@ private:
     float grassLowMaxHeight = 1080.0f; // <= 基本都是低草
     float grassHighMinHeight = 1100.0f; // >= 基本都是高草
 
-    // 混合带宽（世界高度单位）：越大越“糊”越自然
+    // 混合带宽（世界高度单位）：越大越"糊"越自然
     float blendWidth = 30.0f; // 建议 6~30，根据地形高度尺度调
 
-    // 噪声参数：用于“扰动过渡边界”，让过渡碎裂自然
+    // 噪声参数：用于"扰动过渡边界"，让过渡碎裂自然
     float blendNoiseScale = 0.05f;  // 低频噪声
     float blendNoiseAmp = 0.25f;  // 0~1，建议 0.15~0.5
 
     // 过渡曲线：>1 会让过渡更集中/更自然（可选）
     float blendPower = 1.2f;
+
+private:
+    void loadTextures();
+    void setupShader();
 };
 
 inline Terrain::Terrain(
@@ -139,6 +148,67 @@ inline void Terrain::render(const glm::mat4& view, const glm::mat4& projection, 
     terrainShader.setVec3("lightColor", color);
 
     // Bind textures
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, grassLowTex);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, grassHighTex);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, noiseTex);
+
+    terrainSystem.Draw(
+        terrainShader,
+        model,
+        view,
+        projection,
+        cameraPos
+    );
+}
+
+// Shadow pass: render terrain geometry into shadow depth map using shadow shader
+inline void Terrain::renderShadow(Shader& shadowShader, const glm::mat4& lightSpaceMatrix, const glm::vec3& shadowCenter) {
+    shadowShader.use();
+    shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+    glm::mat4 model = glm::mat4(1.0f);
+    shadowShader.setMat4("model", model);
+
+    // Use light-space view/projection for frustum culling and LOD — follows shadow center
+    float shadowOrthoSize = 300.0f;
+    glm::mat4 lightProjection = glm::ortho(-shadowOrthoSize, shadowOrthoSize,
+                                            -shadowOrthoSize, shadowOrthoSize, 1.0f, 500.0f);
+    glm::vec3 lightDirToSun = glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f));
+    glm::vec3 lightPos = shadowCenter + lightDirToSun * 200.0f;
+    glm::mat4 lightView = glm::lookAt(lightPos, shadowCenter, glm::vec3(0.0f, 1.0f, 0.0f));
+
+    // Draw terrain chunks via terrainSystem, using shadow shader
+    // shadowShader doesn't use view/projection (uses lightSpaceMatrix instead),
+    // but TerrainSystem::Draw needs them for frustum culling + LOD
+    terrainSystem.Draw(
+        shadowShader,
+        model,
+        lightView,
+        lightProjection,
+        lightPos  // camera position for LOD selection
+    );
+}
+
+// Normal render pass with shadow map
+inline void Terrain::renderWithShadow(const glm::mat4& view, const glm::mat4& projection,
+                                       const glm::vec3& cameraPos,
+                                       const glm::mat4& lightSpaceMatrix, int shadowMapUnit) {
+    terrainShader.use();
+
+    glm::mat4 model = glm::mat4(1.0f);
+    terrainShader.setMat4("model", model);
+    terrainShader.setMat4("view", view);
+    terrainShader.setMat4("projection", projection);
+    terrainShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+    terrainShader.setInt("shadowMap", shadowMapUnit);
+
+    // Directional light (world space) — lightDir points INTO ground (terrain.fs does L = -lightDir)
+    glm::vec3 dir = glm::normalize(glm::vec3(-0.3f, -1.0f, -0.4f));
+    terrainShader.setVec3("lightDir", dir);
+    terrainShader.setVec3("lightColor", glm::vec3(1.2f, 1.15f, 1.05f)); // terrain sunlight
+    terrainShader.setVec3("viewPos", cameraPos);
+
+    // Bind textures (terrain textures on units 0-2, shadow on specified unit)
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, grassLowTex);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, grassHighTex);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, noiseTex);

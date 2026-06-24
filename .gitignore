@@ -1,13 +1,51 @@
-# Build directories
+# ================= 构建产物 =================
 /build/
 /out/
-/include/
 
-# Visual Studio
+# ================= IDE 配置 =================
+.idea/
 .vs/
 *.suo
 *.user
 *.vcxproj.filters
 *.vcxproj.user
+*.slnx
+
+# ================= 操作系统 =================
+Thumbs.db
+.DS_Store
+
+# ================= 大体积资产文件（非构建必需） =================
 src/assets/car/mcl39/mcl39.obj
 src/assets/car/mcl39/mcl39.zip
+
+# ================= 第三方库：不需要的文件 =================
+# --- Assimp：测试数据(114MB)、工具、文档、示例 ---
+include/assimp/test/
+include/assimp/tools/
+include/assimp/doc/
+include/assimp/samples/
+include/assimp/fuzz/
+include/assimp/.github/
+# --- GLM：测试、文档 ---
+include/glm/test/
+include/glm/doc/
+include/glm/.github/
+# --- ImGui：示例、文档 ---
+include/imgui-1.90.4/examples/
+include/imgui-1.90.4/docs/
+include/imgui-1.90.4/.github/
+# --- GLEW：文档、运行时DLL（静态链接不需要） ---
+glew-2.3.1/doc/
+glew-2.3.1/bin/
+# --- GLFW：只保留 WIN64 + lib-vc2022 ---
+glfw-3.4.bin.WIN32/
+glfw-3.4.bin.WIN64/docs/
+glfw-3.4.bin.WIN64/lib-mingw-w64/
+glfw-3.4.bin.WIN64/lib-static-ucrt/
+glfw-3.4.bin.WIN64/lib-vc2013/
+glfw-3.4.bin.WIN64/lib-vc2015/
+glfw-3.4.bin.WIN64/lib-vc2017/
+glfw-3.4.bin.WIN64/lib-vc2019/
+# --- 旧版 GLFW 头文件（空目录，未使用） ---
+include/glfw-3.3.8/
